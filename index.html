@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>健身趨勢儀表板</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f9; padding: 20px; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h1 { text-align: center; color: #333; }
+        .controls { margin-bottom: 20px; text-align: center; }
+        select { padding: 10px; font-size: 16px; border-radius: 5px; border: 1px solid #ddd; }
+        .stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-bottom: 20px; }
+        .stat-card { background: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center; border-left: 5px solid #007bff; }
+        .stat-card h3 { margin: 0 0 5px 0; font-size: 14px; color: #666; }
+        .stat-card p { margin: 0; font-size: 24px; font-weight: bold; color: #333; }
+        canvas { max-width: 100%; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>🏋️ 健身趨勢圖</h1>
+    
+    <div class="controls">
+        <label for="exerciseSelect">選擇動作：</label>
+        <select id="exerciseSelect" onchange="updateDashboard()">
+            </select>
+    </div>
+
+    <div class="stats-grid">
+        <div class="stat-card" style="border-color: #28a745;">
+            <h3>PR (最高訓練量)</h3>
+            <p id="prValue">-</p>
+        </div>
+        <div class="stat-card" style="border-color: #17a2b8;">
+            <h3>最近一次訓練量</h3>
+            <p id="latestVolume">-</p>
+        </div>
+        <div class="stat-card" style="border-color: #ffc107;">
+            <h3>最近訓練日期</h3>
+            <p id="latestDate">-</p>
+        </div>
+        <div class="stat-card" style="border-color: #dc3545;">
+            <h3>總訓練次數</h3>
+            <p id="totalSessions">-</p>
+        </div>
+    </div>
+
+    <canvas id="trendChart"></canvas>
+</div>
+
+<script>
+    // 1. 原始數據 (來自 Google Sheets 的 Log)
+    const rawData = [
+        {date: '2025-10-09', action: '酒杯蹲', volume: 360},
+        {date: '2025-10-09', action: 'RDL', volume: 200},
+        {date: '2025-10-16', action: '雪橇行走', volume: 32}, // 範例：已簡化多組數據為單筆，或需聚合
+        {date: '2025-10-16', action: '酒杯蹲', volume: 160},
+        {date: '2025-10-16', action: '箱上酒杯蹲', volume: 240},
+        {date: '2025-10-16', action: '槓鈴深蹲', volume: 150},
+        {date: '2025-11-06', action: '槓鈴 DRL', volume: 685}, // 聚合當日總量
+        {date: '2025-11-06', action: '槓鈴肩推', volume: 290},
+        {date: '2025-11-14', action: '槓鈴 DRL', volume: 570},
+        {date: '2025-11-14', action: '酒杯蹲', volume: 675},
+        {date: '2025-11-14', action: '槓鈴肩推', volume: 200},
+        {date: '2025-11-20', action: '彈力繩引體向上', volume: 2400},
+        {date: '2025-11-20', action: '俯臥槓鈴划船', volume: 700},
+        {date: '2025-11-20', action: '槓鈴深蹲', volume: 425},
+        {date: '2025-11-27', action: '彈力繩引體向上', volume: 1200},
+        {date: '2025-12-18', action: '酒杯蹲', volume: 336},
+        {date: '2025-12-18', action: '箱上蹲', volume: 224},
+        {date: '2025-12-18', action: '肩推', volume: 444.5},
+        {date: '2025-12-18', action: '六角槓', volume: 562.5}
+    ];
+
+    // 2. 動作清單 (來自 Google Sheets 的 Lists)
+    const actionList = [
+        "酒杯蹲", "RDL", "雪橇行走", "箱上酒杯蹲", "槓鈴深蹲", 
+        "槓鈴 DRL", "槓鈴肩推", "彈力繩引體向上", "俯臥槓鈴划船", 
+        "箱上蹲", "肩推", "六角槓"
+    ];
+
+    let chartInstance = null;
+
+    // 初始化頁面
+    function init() {
+        const select = document.getElementById('exerciseSelect');
+        actionList.forEach(action => {
+            const option = document.createElement('option');
+            option.value = action;
+            option.text = action;
+            select.appendChild(option);
+        });
+        
+        // 預設選擇第一個
+        select.value = "酒杯蹲";
+        updateDashboard();
+    }
+
+    // 更新儀表板數據
+    function updateDashboard() {
+        const selectedAction = document.getElementById('exerciseSelect').value;
+        
+        // 過濾出該動作的數據，並按日期排序
+        const filteredData = rawData
+            .filter(d => d.action === selectedAction)
+            .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+        // 計算統計數據
+        if (filteredData.length === 0) {
+            document.getElementById('prValue').innerText = "無數據";
+            document.getElementById('latestVolume').innerText = "-";
+            document.getElementById('latestDate').innerText = "-";
+            document.getElementById('totalSessions').innerText = "0";
+            renderChart([], []);
+            return;
+        }
+
+        const volumes = filteredData.map(d => d.volume);
+        const dates = filteredData.map(d => d.date);
+        
+        const pr = Math.max(...volumes);
+        const latestVol = volumes[volumes.length - 1];
+        const latestDt = dates[dates.length - 1];
+        const count = volumes.length;
+
+        document.getElementById('prValue').innerText = pr.toLocaleString();
+        document.getElementById('latestVolume').innerText = latestVol.toLocaleString();
+        document.getElementById('latestDate').innerText = latestDt;
+        document.getElementById('totalSessions').innerText = count;
+
+        renderChart(dates, volumes);
+    }
+
+    // 繪製圖表
+    function renderChart(labels, data) {
+        const ctx = document.getElementById('trendChart').getContext('2d');
+        
+        if (chartInstance) {
+            chartInstance.destroy();
+        }
+
+        chartInstance = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: '訓練量 (Volume)',
+                    data: data,
+                    borderColor: '#007bff',
+                    backgroundColor: 'rgba(0, 123, 255, 0.1)',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 5,
+                    pointHoverRadius: 7
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { display: false },
+                    title: { display: true, text: '訓練量趨勢' }
+                },
+                scales: {
+                    y: { beginAtZero: true, title: { display: true, text: 'Volume (kg * reps * sets)' } },
+                    x: { title: { display: true, text: '日期' } }
+                }
+            }
+        });
+    }
+
+    // 啟動
+    init();
+</script>
+
+</body>
+</html>
